@@ -1,12 +1,12 @@
 package main
 
 import (
-	"bplus-tree/btree"
 	"fmt"
+	bplustree "storage-engine/bplus-tree"
 )
 
 func main() {
-	btree := btree.New(3)
+	btree := bplustree.New(3)
 
 	btree.Insert([]byte("10"), "10")
 	btree.Insert([]byte("11"), "11")
