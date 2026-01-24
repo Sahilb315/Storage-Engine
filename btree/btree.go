@@ -57,7 +57,7 @@ func (b *BTree) Insert(key []byte, value string) error {
 		// append the key value to the insertion index
 		b.insertKVInLeafInPlace(curr, key, value, kvInsertionIndex)
 		// check if the lead node has max keys
-		if b.checkOrder(len(curr.key)) {
+		if b.checkMaxKeys(len(curr.key)) {
 			// if max keys, split (recursive process till parent is also not overflowed with keys)
 			_, _ = b.splitNode(curr, path)
 			return nil
@@ -73,9 +73,148 @@ func (b *BTree) Get(key []byte) (string, error) {
 		n = b.traverseRightOrLeft(n, key)
 	}
 
-	idx := b.findKeyIndexInNode(n, key)
+	idx := -1
+	for i, k := range n.key {
+		if bytes.Equal(k, key) {
+			idx = i
+		}
+	}
+
+	if idx == -1 {
+		return "", fmt.Errorf("no key found")
+	}
 
 	return n.value[idx], nil
+}
+
+func (b *BTree) Delete(key []byte) error {
+	curr := b.root
+	path := make([]*Node, 0)
+
+	for curr != nil && len(curr.children) != 0 {
+		path = append(path, curr)
+		curr = b.traverseRightOrLeft(curr, key)
+	}
+
+	deleteIdx := b.findKeyIndexInNode(curr, key)
+
+	if deleteIdx < 0 {
+		return fmt.Errorf("could not find key")
+	}
+
+	curr.key = append(curr.key[:deleteIdx], curr.key[deleteIdx+1:]...)
+	curr.value = append(curr.value[:deleteIdx], curr.value[deleteIdx+1:]...)
+
+	// check if the leaf node is underflowed
+	if !b.checkMinKeys(len(curr.key)) {
+		var parent *Node
+		if len(path) != 0 {
+			parent = path[len(path)-1]
+		}
+		if parent == nil {
+			return fmt.Errorf("could not find key: invalid parent")
+		}
+
+		currChildNodeIndex := b.getChildIndexFromParentChildren(parent, curr)
+		if currChildNodeIndex < 0 {
+			return fmt.Errorf("could not find key: invalid currChildIndex")
+		}
+
+		var leftSibling *Node
+		var rightSibling *Node
+
+		if currChildNodeIndex > 0 {
+			leftSibling = parent.children[currChildNodeIndex-1]
+		}
+		if currChildNodeIndex < len(parent.children)-1 {
+			rightSibling = parent.children[currChildNodeIndex+1]
+		}
+
+		// try borrowing from siblings
+		if leftSibling != nil && b.checkMinKeys(len(leftSibling.key)) {
+			curr = b.borrowKeyFromLeafNode(leftSibling, curr, true)
+		} else if rightSibling != nil && b.checkMinKeys(len(rightSibling.key)) {
+			curr = b.borrowKeyFromLeafNode(rightSibling, curr, false)
+		} else {
+			// not able to borrow; merge
+			if leftSibling != nil {
+				leftSibling = b.mergeLeafNodes(curr, leftSibling, true)
+				separatorKeyIdxToRemove := currChildNodeIndex - 1
+				parent.key = append(parent.key[:separatorKeyIdxToRemove], parent.key[separatorKeyIdxToRemove+1:]...)
+			} else {
+				separatorKeyIdxToRemove := currChildNodeIndex
+				parent.key = append(parent.key[:separatorKeyIdxToRemove], parent.key[separatorKeyIdxToRemove+1:]...)
+				rightSibling = b.mergeLeafNodes(curr, rightSibling, false)
+			}
+			parent.children = append(parent.children[:currChildNodeIndex], parent.children[currChildNodeIndex+1:]...)
+		}
+
+		// update the parent separator
+		for i := 0; i < len(parent.key); i++ {
+			parent.key[i] = parent.children[i+1].key[0]
+		}
+		return nil
+	}
+	return nil
+}
+
+func (b *BTree) mergeLeafNodes(src, dst *Node, mergeWithLeft bool) *Node {
+	if mergeWithLeft {
+		dst.key = append(dst.key, src.key...)
+		dst.value = append(dst.value, src.value...)
+
+		return dst
+	} else {
+		dst.key = append(src.key, dst.key...)
+		dst.value = append(src.value, dst.value...)
+		return dst
+	}
+}
+
+func (b *BTree) borrowKeyFromLeafNode(src, dst *Node, borrowFromLeft bool) *Node {
+	// borrow from the left sibling i.e. get the rightmost key
+	if borrowFromLeft {
+		lastIdx := len(src.key) - 1
+		lastKey := src.key[lastIdx]
+		lastVal := src.value[lastIdx]
+
+		// remove the last KV from the source / borrower
+		src.key = src.key[:len(src.key)-1]
+		src.value = src.value[:len(src.value)-1]
+
+		// prepend the KV into the dst
+		dst.key = append([][]byte{lastKey}, dst.key...)
+		dst.value = append([]string{lastVal}, dst.value...)
+
+		return dst
+	} else { // borrow from the right sibling i.e. get the leftmost key
+		firstKey := src.key[0]
+		firstVal := src.value[0]
+
+		// remove the first KV from the source / borrower
+		src.key = src.key[1:]
+		src.value = src.value[1:]
+
+		// append the KV into the dst
+		dst.key = append(dst.key, firstKey)
+		dst.value = append(dst.value, firstVal)
+
+		return dst
+	}
+}
+
+func (b *BTree) getChildIndexFromParentChildren(parent, child *Node) int {
+	if parent == nil || child == nil {
+		return -1
+	}
+
+	for i, c := range parent.children {
+		if c == child {
+			return i
+		}
+	}
+
+	return -1
 }
 
 func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
@@ -117,7 +256,7 @@ func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
 		}
 		insertionIdx := b.findKeyIndexInNode(parent, separatorKey)
 		b.insertKeyInNodeInPlace(parent, separatorKey, right, insertionIdx)
-		if b.checkOrder(len(parent.key)) {
+		if b.checkMaxKeys(len(parent.key)) {
 			return b.splitNode(parent, path[:len(path)-1])
 		}
 		return
@@ -155,7 +294,7 @@ func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
 		}
 		insertionIdx := b.findKeyIndexInNode(parent, separatorKey)
 		b.insertKeyInNodeInPlace(parent, separatorKey, right, insertionIdx)
-		if b.checkOrder(len(parent.key)) {
+		if b.checkMaxKeys(len(parent.key)) {
 			return b.splitNode(parent, path[:len(path)-1])
 		}
 		return
@@ -191,8 +330,12 @@ func (b *BTree) insertKVInLeafInPlace(
 	node.value[indexToInsert] = val
 }
 
-func (b *BTree) checkOrder(keysLen int) bool {
+func (b *BTree) checkMaxKeys(keysLen int) bool {
 	return keysLen > 2*b.order
+}
+
+func (b *BTree) checkMinKeys(keysLen int) bool {
+	return keysLen > b.order
 }
 
 func (b *BTree) traverseRightOrLeft(node *Node, key []byte) *Node {
@@ -222,4 +365,100 @@ func (b *BTree) findKeyIndexInNode(node *Node, key []byte) int {
 	}
 
 	return len(node.key)
+}
+
+// PrettyPrint prints the B+tree in a hierarchical format
+func (b *BTree) PrettyPrint() {
+	if b.root == nil {
+		fmt.Println("Empty tree")
+		return
+	}
+
+	fmt.Println("B+Tree Structure:")
+	fmt.Println("==================")
+	b.printNode(b.root, "", true, 0)
+
+	// Also print leaf level traversal
+	// fmt.Println("\nLeaf Level Traversal:")
+	// fmt.Println("=====================")
+	// b.printLeafTraversal()
+}
+
+func (b *BTree) printNode(node *Node, prefix string, isLast bool, level int) {
+	if node == nil {
+		return
+	}
+
+	connector := "├── "
+	if isLast {
+		connector = "└── "
+	}
+
+	fmt.Printf("%s%s", prefix, connector)
+
+	// Print node type and keys
+	if len(node.children) == 0 {
+		// Leaf node
+		fmt.Printf("LEAF [")
+		for i, key := range node.key {
+			if i > 0 {
+				fmt.Printf(", ")
+			}
+			fmt.Printf("%s:%s", string(key), node.value[i])
+		}
+		fmt.Printf("]\n")
+	} else {
+		// Internal node
+		fmt.Printf("INTERNAL [")
+		for i, key := range node.key {
+			if i > 0 {
+				fmt.Printf(", ")
+			}
+			fmt.Printf("%s", string(key))
+		}
+		fmt.Printf("]\n")
+	}
+
+	newPrefix := prefix
+	if isLast {
+		newPrefix += "    "
+	} else {
+		newPrefix += "│   "
+	}
+
+	// Recursively print children for internal nodes
+	if len(node.children) > 0 {
+		for i, child := range node.children {
+			isLastChild := i == len(node.children)-1
+			b.printNode(child, newPrefix, isLastChild, level+1)
+		}
+	}
+}
+
+func (b *BTree) printLeafTraversal() {
+	if b.root == nil {
+		fmt.Println("Empty tree")
+		return
+	}
+
+	// Find the leftmost leaf node
+	current := b.root
+	for current != nil && len(current.children) > 0 {
+		current = current.children[0]
+	}
+
+	// Traverse leaf nodes using next pointers
+	fmt.Print("Keys: ")
+	first := true
+	for current != nil {
+		for i, key := range current.key {
+			if !first {
+				fmt.Print(" -> ")
+			}
+			fmt.Printf("[%s:%s]", string(key), current.value[i])
+			first = false
+		}
+		current = current.next
+	}
+	fmt.Println()
 }
