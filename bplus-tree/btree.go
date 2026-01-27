@@ -107,70 +107,100 @@ func (b *BTree) Delete(key []byte) error {
 
 	// check if the leaf node is underflowed
 	if !b.checkMinKeys(len(curr.key)) {
-		var parent *Node
-		if len(path) != 0 {
-			parent = path[len(path)-1]
-		}
-		if parent == nil {
-			return fmt.Errorf("could not find key: invalid parent")
-		}
-
-		currChildNodeIndex := b.getChildIndexFromParentChildren(parent, curr)
-		if currChildNodeIndex < 0 {
-			return fmt.Errorf("could not find key: invalid currChildIndex")
-		}
-
-		var leftSibling *Node
-		var rightSibling *Node
-
-		if currChildNodeIndex > 0 {
-			leftSibling = parent.children[currChildNodeIndex-1]
-		}
-		if currChildNodeIndex < len(parent.children)-1 {
-			rightSibling = parent.children[currChildNodeIndex+1]
-		}
-
-		// try borrowing from siblings
-		if leftSibling != nil && b.checkMinKeys(len(leftSibling.key)) {
-			curr = b.borrowKeyFromLeafNode(leftSibling, curr, true)
-		} else if rightSibling != nil && b.checkMinKeys(len(rightSibling.key)) {
-			curr = b.borrowKeyFromLeafNode(rightSibling, curr, false)
-		} else {
-			// not able to borrow; merge
-			if leftSibling != nil {
-				leftSibling = b.mergeLeafNodes(curr, leftSibling, true)
-				separatorKeyIdxToRemove := currChildNodeIndex - 1
-				parent.key = append(parent.key[:separatorKeyIdxToRemove], parent.key[separatorKeyIdxToRemove+1:]...)
-			} else {
-				separatorKeyIdxToRemove := currChildNodeIndex
-				parent.key = append(parent.key[:separatorKeyIdxToRemove], parent.key[separatorKeyIdxToRemove+1:]...)
-				rightSibling = b.mergeLeafNodes(curr, rightSibling, false)
-			}
-			parent.children = append(parent.children[:currChildNodeIndex], parent.children[currChildNodeIndex+1:]...)
-		}
-
-		// update the parent separator
-		for i := 0; i < len(parent.key); i++ {
-			parent.key[i] = parent.children[i+1].key[0]
-		}
-		return nil
+		_ = b.handleNodeUnderflow(curr, path)
 	}
 	return nil
 }
 
-func (b *BTree) mergeLeafNodes(src, dst *Node, mergeWithLeft bool) *Node {
+func (b *BTree) handleNodeUnderflow(node *Node, path []*Node) error {
+	var parent *Node
+	if len(path) != 0 {
+		parent = path[len(path)-1]
+	}
+
+	if parent == nil {
+		// handle root collapse
+		return nil
+	}
+
+	currChildNodeIndex := b.getChildIndexFromParentChildren(parent, node)
+	if currChildNodeIndex < 0 {
+		return fmt.Errorf("could not find key: invalid currChildIndex")
+	}
+
+	var leftSibling *Node
+	var rightSibling *Node
+
+	if currChildNodeIndex > 0 {
+		leftSibling = parent.children[currChildNodeIndex-1]
+	}
+	if currChildNodeIndex < len(parent.children)-1 {
+		rightSibling = parent.children[currChildNodeIndex+1]
+	}
+
+	// try borrowing from siblings
+	if leftSibling != nil && b.checkMinKeys(len(leftSibling.key)) {
+		if len(node.children) > 0 {
+			node = b.borrowKeyFromINode(leftSibling, node, parent, true)
+		} else {
+			node = b.borrowKeyFromLeafNode(leftSibling, node, true)
+		}
+	} else if rightSibling != nil && b.checkMinKeys(len(rightSibling.key)) {
+		if len(node.children) > 0 {
+			node = b.borrowKeyFromINode(rightSibling, node, parent, false)
+		} else {
+			node = b.borrowKeyFromLeafNode(rightSibling, node, false)
+		}
+	} else {
+		// not able to borrow; merge
+		if leftSibling != nil {
+			leftSibling = b.mergeNodes(node, leftSibling, true)
+			separatorKeyIdxToRemove := currChildNodeIndex - 1
+			parent.key = append(parent.key[:separatorKeyIdxToRemove], parent.key[separatorKeyIdxToRemove+1:]...)
+		} else {
+			separatorKeyIdxToRemove := currChildNodeIndex
+			parent.key = append(parent.key[:separatorKeyIdxToRemove], parent.key[separatorKeyIdxToRemove+1:]...)
+			rightSibling = b.mergeNodes(node, rightSibling, false)
+		}
+		// after merging nodes, only one node is required. we do not require the other child which was the src
+		parent.children = append(parent.children[:currChildNodeIndex], parent.children[currChildNodeIndex+1:]...)
+	}
+
+	// update the parent separator
+	for i := 0; i < len(parent.key); i++ {
+		parent.key[i] = parent.children[i+1].key[0]
+	}
+
+	if !b.checkMinKeys(len(parent.key)) {
+		// check underflow for internal nodes
+		_ = b.handleNodeUnderflow(parent, path[:len(path)-1])
+		// try borrowing from sibling
+		// else try merging
+	}
+
+	return nil
+}
+
+// dst is the node where the merge happens i.e. the node which satisfies the min keys criteria
+// src is the underflowed node which merges with the `dst` node
+func (b *BTree) mergeNodes(src, dst *Node, mergeWithLeft bool) *Node {
 	if mergeWithLeft {
 		dst.key = append(dst.key, src.key...)
 		dst.value = append(dst.value, src.value...)
+		dst.children = append(dst.children, src.children...)
 
 		return dst
 	} else {
 		dst.key = append(src.key, dst.key...)
 		dst.value = append(src.value, dst.value...)
+		dst.children = append(src.children, dst.children...)
+
 		return dst
 	}
 }
 
+// src is the node from which the KV is borrowed from
+// dst is the underflowed node which borrows a KV from `src`.
 func (b *BTree) borrowKeyFromLeafNode(src, dst *Node, borrowFromLeft bool) *Node {
 	// borrow from the left sibling i.e. get the rightmost key
 	if borrowFromLeft {
@@ -198,6 +228,49 @@ func (b *BTree) borrowKeyFromLeafNode(src, dst *Node, borrowFromLeft bool) *Node
 		// append the KV into the dst
 		dst.key = append(dst.key, firstKey)
 		dst.value = append(dst.value, firstVal)
+
+		return dst
+	}
+}
+
+func (b *BTree) borrowKeyFromINode(src, dst, parent *Node, borrowFromLeft bool) *Node {
+	if borrowFromLeft {
+		lastKey := parent.key[len(parent.key)-1]
+
+		// demote / remove the key from the parent
+		parent.key = parent.key[:len(parent.key)-1]
+
+		// prepend the Key to the dst node
+		dst.key = append([][]byte{lastKey}, dst.key...)
+		dst.children = append([]*Node{src.children[len(src.children)-1]}, dst.children...)
+
+		// promote the sibling key to its parent
+		keyToBePromoted := src.key[len(src.key)-1]
+
+		// remove the key from the sibling node
+		src.key = src.key[:len(src.key)-1]
+		src.children = src.children[:len(src.key)-1]
+
+		parent.key = append([][]byte{keyToBePromoted}, parent.key...)
+		return dst
+	} else {
+		firstKey := parent.key[0]
+
+		// demote / remove the key from the parent
+		parent.key = parent.key[1:]
+
+		// append the KV to the dst node
+		dst.key = append(dst.key, firstKey)
+		dst.children = append(dst.children, src.children[0])
+
+		// promote the sibling key to its parent
+		keyToBePromoted := src.key[0]
+
+		// remove the key from the sibling node
+		src.key = src.key[1:]
+		src.children = src.children[1:]
+
+		parent.key = append(parent.key, keyToBePromoted)
 
 		return dst
 	}
