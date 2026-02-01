@@ -21,6 +21,10 @@ type Node struct {
 	prev *Node
 }
 
+func (n *Node) IsLeaf() bool {
+	return len(n.children) == 0
+}
+
 func New(order int) *BTree {
 	return &BTree{order: order}
 }
@@ -44,7 +48,7 @@ func (b *BTree) Insert(key []byte, value string) error {
 	curr := b.root
 	path := make([]*Node, 0)
 
-	for curr != nil && len(curr.children) != 0 {
+	for curr != nil && !curr.IsLeaf() {
 		path = append(path, curr)
 		curr = b.traverseRightOrLeft(curr, key)
 	}
@@ -77,7 +81,7 @@ func (b *BTree) Get(key []byte) (string, error) {
 
 	n := b.root
 
-	for n != nil && len(n.children) != 0 {
+	for n != nil && !n.IsLeaf() {
 		n = b.traverseRightOrLeft(n, key)
 	}
 
@@ -98,7 +102,7 @@ func (b *BTree) Delete(key []byte) error {
 	curr := b.root
 	path := make([]*Node, 0)
 
-	for curr != nil && len(curr.children) != 0 {
+	for curr != nil && !curr.IsLeaf() {
 		path = append(path, curr)
 		curr = b.traverseRightOrLeft(curr, key)
 	}
@@ -141,7 +145,7 @@ func (b *BTree) handleNodeUnderflow(node *Node, path []*Node) error {
 	}
 
 	if parent == nil {
-		if node == b.root && len(node.key) == 0 && len(node.children) > 0 {
+		if node == b.root && len(node.key) == 0 && !node.IsLeaf() {
 			b.root = node.children[0]
 		}
 		return nil
@@ -164,13 +168,13 @@ func (b *BTree) handleNodeUnderflow(node *Node, path []*Node) error {
 
 	// try borrowing from siblings
 	if leftSibling != nil && b.checkMinKeys(len(leftSibling.key)) {
-		if len(node.children) > 0 {
+		if !node.IsLeaf() {
 			node = b.borrowKeyFromINode(leftSibling, node, parent, true)
 		} else {
 			node = b.borrowKeyFromLeafNode(leftSibling, node, true, parent, currChildNodeIndex)
 		}
 	} else if rightSibling != nil && b.checkMinKeys(len(rightSibling.key)) {
-		if len(node.children) > 0 {
+		if !node.IsLeaf() {
 			node = b.borrowKeyFromINode(rightSibling, node, parent, false)
 		} else {
 			node = b.borrowKeyFromLeafNode(rightSibling, node, false, parent, currChildNodeIndex)
@@ -193,7 +197,7 @@ func (b *BTree) handleNodeUnderflow(node *Node, path []*Node) error {
 
 		// Update parent separators to reflect current state of children after merge
 		// Only needed for leaf children; internal node children have correct separators
-		if len(parent.children) > 0 && len(parent.children[0].children) == 0 {
+		if len(parent.children) > 0 && parent.children[0].IsLeaf() {
 			for i := 0; i < len(parent.key); i++ {
 				if i+1 < len(parent.children) && len(parent.children[i+1].key) > 0 {
 					// parent.key[i] = first key of parent.children[i+1]
@@ -215,7 +219,7 @@ func (b *BTree) handleNodeUnderflow(node *Node, path []*Node) error {
 // src is the underflowed node which merges with the `dst` node
 // separatorKey is the key from the parent that separates src and dst (needed for internal nodes)
 func (b *BTree) mergeNodes(src, dst *Node, mergeWithLeft bool, separatorKey []byte) *Node {
-	isInternalNode := len(src.children) > 0 || len(dst.children) > 0
+	isInternalNode := !src.IsLeaf() || !dst.IsLeaf()
 
 	if mergeWithLeft {
 		// dst is left sibling, src is the underflowed node (to the right)
@@ -368,10 +372,8 @@ func (b *BTree) findEqualKeyIndexInNode(node *Node, key []byte) (int, error) {
 }
 
 func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
-	childrenLen := len(node.children)
-
 	// leaf node splitting
-	if childrenLen == 0 {
+	if node.IsLeaf() {
 		right = &Node{}
 		numRightKeys := len(node.key) - b.order
 		right.key = make([][]byte, numRightKeys)
@@ -556,7 +558,7 @@ func (b *BTree) printNode(node *Node, prefix string, isLast bool) {
 
 	// Determine node type label
 	label := "INTERNAL"
-	if len(node.children) == 0 {
+	if node.IsLeaf() {
 		label = "LEAF"
 	} else if node == b.root {
 		label = "ROOT"
@@ -568,7 +570,7 @@ func (b *BTree) printNode(node *Node, prefix string, isLast bool) {
 		if i > 0 {
 			fmt.Print(", ")
 		}
-		if len(node.children) == 0 {
+		if node.IsLeaf() {
 			// Leaf: show key:value
 			fmt.Printf("%s:%s", string(key), node.value[i])
 		} else {
