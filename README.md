@@ -2,6 +2,8 @@
 
 A storage engine built from scratch in Go. Learning project - implementing database internals from first principles.
 
+> Trying to keep the project as raw as possible, there could be rough or missing edge cases.
+
 ## Current Status
 
 **B+ Tree** - Done (in-memory)
