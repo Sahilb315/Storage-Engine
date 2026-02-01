@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
+	"storage-engine/common"
 )
 
 type BTree struct {
@@ -26,6 +28,7 @@ func (n *Node) IsLeaf() bool {
 }
 
 func New(order int) *BTree {
+	common.Assert(order > 0, "order must be positive, got %d", order)
 	return &BTree{order: order}
 }
 
@@ -139,6 +142,8 @@ func (b *BTree) DeleteInt(k int) error {
 }
 
 func (b *BTree) handleNodeUnderflow(node *Node, path []*Node) error {
+	common.Assert(node != nil, "handleNodeUnderflow called with nil node")
+
 	var parent *Node
 	if len(path) != 0 {
 		parent = path[len(path)-1]
@@ -146,12 +151,17 @@ func (b *BTree) handleNodeUnderflow(node *Node, path []*Node) error {
 
 	if parent == nil {
 		if node == b.root && len(node.key) == 0 && !node.IsLeaf() {
+			common.Assert(len(node.children) == 1,
+				"collapsing root with 0 keys should have exactly 1 child, got %d",
+				len(node.children))
 			b.root = node.children[0]
 		}
 		return nil
 	}
 
 	currChildNodeIndex := b.getChildIndexFromParentChildren(parent, node)
+	common.Assert(currChildNodeIndex >= 0,
+		"node not found in parent's children during underflow handling")
 	if currChildNodeIndex < 0 {
 		return fmt.Errorf("could not find key: invalid currChildIndex")
 	}
@@ -219,6 +229,10 @@ func (b *BTree) handleNodeUnderflow(node *Node, path []*Node) error {
 // src is the underflowed node which merges with the `dst` node
 // separatorKey is the key from the parent that separates src and dst (needed for internal nodes)
 func (b *BTree) mergeNodes(src, dst *Node, mergeWithLeft bool, separatorKey []byte) *Node {
+	common.Assert(src.IsLeaf() == dst.IsLeaf(),
+		"mergeNodes called with mismatched node types (src.IsLeaf=%v, dst.IsLeaf=%v)",
+		src.IsLeaf(), dst.IsLeaf())
+
 	isInternalNode := !src.IsLeaf() || !dst.IsLeaf()
 
 	if mergeWithLeft {
@@ -273,6 +287,12 @@ func (b *BTree) mergeNodes(src, dst *Node, mergeWithLeft bool, separatorKey []by
 // dst is the underflowed node which borrows a KV from `src`.
 // parent is the parent node, dstIdx is the index of dst in parent.children
 func (b *BTree) borrowKeyFromLeafNode(src, dst *Node, borrowFromLeft bool, parent *Node, dstIdx int) *Node {
+	common.Assert(src.IsLeaf() && dst.IsLeaf(),
+		"borrowKeyFromLeafNode called with non-leaf nodes (src.IsLeaf=%v, dst.IsLeaf=%v)",
+		src.IsLeaf(), dst.IsLeaf())
+	common.Assert(len(src.key) > 0, "cannot borrow from empty source node")
+	common.Assert(parent != nil, "parent cannot be nil when borrowing")
+
 	// borrow from the left sibling i.e. get the rightmost key
 	if borrowFromLeft {
 		lastIdx := len(src.key) - 1
@@ -311,7 +331,16 @@ func (b *BTree) borrowKeyFromLeafNode(src, dst *Node, borrowFromLeft bool, paren
 }
 
 func (b *BTree) borrowKeyFromINode(src, dst, parent *Node, borrowFromLeft bool) *Node {
+	common.Assert(!src.IsLeaf() && !dst.IsLeaf(),
+		"borrowKeyFromINode called with leaf nodes (src.IsLeaf=%v, dst.IsLeaf=%v)",
+		src.IsLeaf(), dst.IsLeaf())
+	common.Assert(len(src.key) > 0, "cannot borrow from empty source node")
+	common.Assert(len(src.children) > 0, "source internal node has no children")
+	common.Assert(parent != nil, "parent cannot be nil when borrowing")
+
 	idx := b.getChildIndexFromParentChildren(parent, dst)
+	common.Assert(idx >= 0, "dst node not found in parent's children")
+
 	if borrowFromLeft {
 		separatorKey := parent.key[idx-1]
 
@@ -372,8 +401,17 @@ func (b *BTree) findEqualKeyIndexInNode(node *Node, key []byte) (int, error) {
 }
 
 func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
+	common.Assert(node != nil, "cannot split nil node")
+	common.Assert(len(node.key) > 2*b.order,
+		"splitNode called but node only has %d keys (need >%d to split)",
+		len(node.key), 2*b.order)
+
 	// leaf node splitting
 	if node.IsLeaf() {
+		common.Assert(len(node.key) == len(node.value),
+			"leaf node key/value mismatch before split: %d keys, %d values",
+			len(node.key), len(node.value))
+
 		right = &Node{}
 		numRightKeys := len(node.key) - b.order
 		right.key = make([][]byte, numRightKeys)
@@ -422,6 +460,11 @@ func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
 		}
 		return
 	} else {
+		// Internal node split
+		common.Assert(len(node.children) == len(node.key)+1,
+			"internal node children/key mismatch before split: %d children, %d keys",
+			len(node.children), len(node.key))
+
 		right = &Node{}
 
 		// Calculate how many keys go to right (all keys after the separator)
@@ -471,6 +514,11 @@ func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
 }
 
 func (b *BTree) insertKeyInNodeInPlace(node *Node, key []byte, childPtr *Node, indexToInsert int) {
+	common.Assert(!node.IsLeaf(), "insertKeyInNodeInPlace called on leaf node")
+	common.Assert(indexToInsert >= 0 && indexToInsert <= len(node.key),
+		"insertion index %d out of bounds [0, %d]", indexToInsert, len(node.key))
+	common.Assert(childPtr != nil, "childPtr cannot be nil for internal node insertion")
+
 	node.key = append(node.key, nil)
 	node.children = append(node.children, nil)
 
@@ -488,6 +536,12 @@ func (b *BTree) insertKVInLeafInPlace(
 	val string,
 	indexToInsert int,
 ) {
+	common.Assert(node.IsLeaf(), "insertKVInLeafInPlace called on internal node")
+	common.Assert(indexToInsert >= 0 && indexToInsert <= len(node.key),
+		"insertion index %d out of bounds [0, %d]", indexToInsert, len(node.key))
+	common.Assert(len(node.key) == len(node.value),
+		"leaf node key/value length mismatch: %d keys, %d values", len(node.key), len(node.value))
+
 	node.key = append(node.key, nil)
 	node.value = append(node.value, "")
 
@@ -511,6 +565,11 @@ func (b *BTree) traverseRightOrLeft(node *Node, key []byte) *Node {
 	if node == nil {
 		return nil
 	}
+
+	// Internal node invariant: must have exactly len(keys)+1 children
+	common.Assert(len(node.children) == len(node.key)+1,
+		"internal node has %d children but %d keys (expected %d children)",
+		len(node.children), len(node.key), len(node.key)+1)
 
 	for i, v := range node.key {
 		if bytes.Compare(key, v) < 0 {
