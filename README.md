@@ -8,9 +8,7 @@ A storage engine built from scratch in Go. Learning project - implementing datab
 
 **B+ Tree** - Done (in-memory)
 - Insert, Get, Delete
-- Node splitting and merging
-- Borrowing from siblings
-- Tested with randomized operations
+- Iterator with Seek, SeekFirst, SeekLast, Next, Prev
 
 ## What's Next
 
@@ -25,9 +23,11 @@ A storage engine built from scratch in Go. Learning project - implementing datab
 ```
 storage-engine/
 ├── bplus-tree/
-│   ├── btree.go       # B+ tree implementation
-│   └── btree_test.go  # Tests
-├── main.go            # Playground for testing
+│   ├── btree.go          # B+ tree implementation
+│   ├── iterator.go       # Iterator for range scans
+│   ├── btree_test.go     
+│   └── iterator_test.go  
+├── main.go               # Playground for testing
 └── README.md
 ```
 
@@ -52,6 +52,16 @@ err := tree.Delete([]byte("key"))
 tree.InsertInt(42, "value")
 tree.GetInt(42)
 tree.DeleteInt(42)
+
+// Iterator - range scans
+iter := tree.SeekFirst()
+for iter.Valid() {
+    fmt.Println(iter.Key(), iter.Value())
+    iter.Next()
+}
+
+// Seek to specific key
+iter, _ := tree.Seek([]byte("key"))
 ```
 
 ## Running Tests
