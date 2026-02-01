@@ -15,7 +15,10 @@ type Node struct {
 	key      [][]byte
 	value    []string // only if node is leaf node
 	children []*Node  // only if node is internal / root node
-	next     *Node    // only if node is leaf node
+
+	// maintain a doubly linked list
+	next *Node // only if node is leaf node
+	prev *Node
 }
 
 func New(order int) *BTree {
@@ -118,6 +121,19 @@ func (b *BTree) Delete(key []byte) error {
 	return nil
 }
 
+// Convenience helpers that encode integer keys using fixed-width big-endian
+func (b *BTree) InsertInt(k int, value string) error {
+	return b.Insert(convertIntToByte(k), value)
+}
+
+func (b *BTree) GetInt(k int) (string, error) {
+	return b.Get(convertIntToByte(k))
+}
+
+func (b *BTree) DeleteInt(k int) error {
+	return b.Delete(convertIntToByte(k))
+}
+
 func (b *BTree) handleNodeUnderflow(node *Node, path []*Node) error {
 	var parent *Node
 	if len(path) != 0 {
@@ -214,6 +230,11 @@ func (b *BTree) mergeNodes(src, dst *Node, mergeWithLeft bool, separatorKey []by
 			dst.value = append(dst.value, src.value...)
 			// Update the next pointer: dst now points to what src pointed to
 			dst.next = src.next
+
+			// update the prev pointer of the next node
+			if dst.next != nil {
+				dst.next.prev = dst
+			}
 		}
 
 		return dst
@@ -232,9 +253,12 @@ func (b *BTree) mergeNodes(src, dst *Node, mergeWithLeft bool, separatorKey []by
 			// For leaf nodes: just concatenate
 			dst.key = append(src.key, dst.key...)
 			dst.value = append(src.value, dst.value...)
-			// Note: the node pointing to src should now point to dst,
-			// but we can't update that without a prev pointer.
-			// Tree traversal still works correctly.
+
+			if src.prev != nil {
+				src.prev.next = dst
+			}
+
+			dst.prev = src.prev
 		}
 
 		return dst
@@ -363,6 +387,13 @@ func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
 
 		right.next = left.next
 		left.next = right
+
+		right.prev = left
+
+		if right.next != nil {
+			// update the prev pointer of the next node
+			right.next.prev = right
+		}
 
 		left.key = left.key[:b.order]
 		left.value = left.value[:b.order]
@@ -573,17 +604,4 @@ func convertBytetoInt(b []byte) int {
 		return int(binary.BigEndian.Uint64(tmp[:]))
 	}
 	return int(binary.BigEndian.Uint64(b))
-}
-
-// Convenience helpers that encode integer keys using fixed-width big-endian
-func (b *BTree) InsertInt(k int, value string) error {
-	return b.Insert(convertIntToByte(k), value)
-}
-
-func (b *BTree) GetInt(k int) (string, error) {
-	return b.Get(convertIntToByte(k))
-}
-
-func (b *BTree) DeleteInt(k int) error {
-	return b.Delete(convertIntToByte(k))
 }
