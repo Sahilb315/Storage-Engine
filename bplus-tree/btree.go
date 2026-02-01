@@ -68,6 +68,10 @@ func (b *BTree) Insert(key []byte, value string) error {
 }
 
 func (b *BTree) Get(key []byte) (string, error) {
+	if b.root == nil {
+		return "", fmt.Errorf("tree is empty")
+	}
+
 	n := b.root
 
 	for n != nil && len(n.children) != 0 {
@@ -84,6 +88,10 @@ func (b *BTree) Get(key []byte) (string, error) {
 }
 
 func (b *BTree) Delete(key []byte) error {
+	if b.root == nil {
+		return fmt.Errorf("tree is empty")
+	}
+
 	curr := b.root
 	path := make([]*Node, 0)
 
@@ -166,15 +174,15 @@ func (b *BTree) handleNodeUnderflow(node *Node, path []*Node) error {
 		}
 		// after merging nodes, only one node is required. we do not require the other child which was the src
 		parent.children = append(parent.children[:currChildNodeIndex], parent.children[currChildNodeIndex+1:]...)
-	}
 
-	// Update parent separators to reflect current state of children
-	// Only needed for leaf children; internal node children have correct separators from borrow/merge
-	if len(parent.children) > 0 && len(parent.children[0].children) == 0 {
-		// Children are leaves - update separators to first key of each child
-		for i := 0; i < len(parent.key); i++ {
-			if i+1 < len(parent.children) && len(parent.children[i+1].key) > 0 {
-				parent.key[i] = parent.children[i+1].key[0]
+		// Update parent separators to reflect current state of children after merge
+		// Only needed for leaf children; internal node children have correct separators
+		if len(parent.children) > 0 && len(parent.children[0].children) == 0 {
+			for i := 0; i < len(parent.key); i++ {
+				if i+1 < len(parent.children) && len(parent.children[i+1].key) > 0 {
+					// parent.key[i] = first key of parent.children[i+1]
+					parent.key[i] = parent.children[i+1].key[0]
+				}
 			}
 		}
 	}
@@ -199,14 +207,14 @@ func (b *BTree) mergeNodes(src, dst *Node, mergeWithLeft bool, separatorKey []by
 			// For internal nodes: include separator key between dst and src keys
 			dst.key = append(dst.key, separatorKey)
 			dst.key = append(dst.key, src.key...)
+			dst.children = append(dst.children, src.children...)
 		} else {
 			// For leaf nodes: just concatenate (separator is copy-up, not stored)
 			dst.key = append(dst.key, src.key...)
+			dst.value = append(dst.value, src.value...)
 			// Update the next pointer: dst now points to what src pointed to
 			dst.next = src.next
 		}
-		dst.value = append(dst.value, src.value...)
-		dst.children = append(dst.children, src.children...)
 
 		return dst
 	} else {
@@ -217,16 +225,17 @@ func (b *BTree) mergeNodes(src, dst *Node, mergeWithLeft bool, separatorKey []by
 			newKeys = append(newKeys, src.key...)
 			newKeys = append(newKeys, separatorKey)
 			newKeys = append(newKeys, dst.key...)
+
 			dst.key = newKeys
+			dst.children = append(src.children, dst.children...)
 		} else {
 			// For leaf nodes: just concatenate
 			dst.key = append(src.key, dst.key...)
+			dst.value = append(src.value, dst.value...)
 			// Note: the node pointing to src should now point to dst,
 			// but we can't update that without a prev pointer.
 			// Tree traversal still works correctly.
 		}
-		dst.value = append(src.value, dst.value...)
-		dst.children = append(src.children, dst.children...)
 
 		return dst
 	}
@@ -337,15 +346,17 @@ func (b *BTree) findEqualKeyIndexInNode(node *Node, key []byte) (int, error) {
 func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
 	childrenLen := len(node.children)
 
+	// leaf node splitting
 	if childrenLen == 0 {
 		right = &Node{}
-		right.key = make([][]byte, b.order+1)
-		right.value = make([]string, b.order+1)
+		numRightKeys := len(node.key) - b.order
+		right.key = make([][]byte, numRightKeys)
+		right.value = make([]string, numRightKeys)
 
 		left = node
 
 		// copy the order+1 KV to the new node
-		for i := 0; i <= b.order; i++ {
+		for i := range numRightKeys {
 			right.key[i] = left.key[b.order+i]
 			right.value[i] = left.value[b.order+i]
 		}
@@ -379,21 +390,21 @@ func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
 		return
 	} else {
 		right = &Node{}
-		
+
 		// Calculate how many keys go to right (all keys after the separator)
 		numRightKeys := len(node.key) - b.order - 1
 		numRightChildren := len(node.children) - b.order - 1
-		
+
 		right.key = make([][]byte, numRightKeys)
 		right.children = make([]*Node, numRightChildren)
 
 		left = node
 
 		// Copy keys and children to right node
-		for i := 0; i < numRightKeys; i++ {
+		for i := range numRightKeys {
 			right.key[i] = left.key[b.order+1+i]
 		}
-		for i := 0; i < numRightChildren; i++ {
+		for i := range numRightChildren {
 			right.children[i] = left.children[b.order+1+i]
 		}
 
@@ -416,7 +427,9 @@ func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
 			return
 		}
 		insertionIdx := b.findKeyIndexInNode(parent, separatorKey)
+
 		b.insertKeyInNodeInPlace(parent, separatorKey, right, insertionIdx)
+
 		if b.checkMaxKeys(len(parent.key)) {
 			return b.splitNode(parent, path[:len(path)-1])
 		}
