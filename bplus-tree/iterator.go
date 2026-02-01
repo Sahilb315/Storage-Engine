@@ -112,9 +112,9 @@ func (i *iterator) Key() []byte {
 	return i.node.key[i.idx]
 }
 
-func (i *iterator) Value() string {
+func (i *iterator) Value() []byte {
 	if !i.Valid() {
-		return ""
+		return nil
 	}
 	return i.node.value[i.idx]
 }

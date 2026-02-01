@@ -11,7 +11,7 @@ func main() {
 	poolSize := 300
 	for i := range poolSize {
 		key := fmt.Sprintf("k%04d", i)
-		btree.Insert([]byte(key), strconv.Itoa(i))
+		btree.Insert([]byte(key), []byte(strconv.Itoa(i)))
 	}
 	btree.PrettyPrint()
 
@@ -27,5 +27,5 @@ func main() {
 	if err != nil {
 		fmt.Println("Error while getting value: ", err)
 	}
-	fmt.Println("Value of key: ", v)
+	fmt.Println("Value of key: ", string(v))
 }

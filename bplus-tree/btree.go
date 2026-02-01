@@ -15,7 +15,7 @@ type BTree struct {
 
 type Node struct {
 	key      [][]byte
-	value    []string // only if node is leaf node
+	value    [][]byte // only if node is leaf node
 	children []*Node  // only if node is internal / root node
 
 	// maintain a doubly linked list
@@ -32,11 +32,11 @@ func New(order int) *BTree {
 	return &BTree{order: order}
 }
 
-func (b *BTree) Insert(key []byte, value string) error {
+func (b *BTree) Insert(key []byte, value []byte) error {
 	if b.root == nil {
 		root := &Node{
 			key:      make([][]byte, 0),
-			value:    make([]string, 0),
+			value:    make([][]byte, 0),
 			children: make([]*Node, 0),
 		}
 
@@ -77,9 +77,9 @@ func (b *BTree) Insert(key []byte, value string) error {
 	return nil
 }
 
-func (b *BTree) Get(key []byte) (string, error) {
+func (b *BTree) Get(key []byte) ([]byte, error) {
 	if b.root == nil {
-		return "", fmt.Errorf("tree is empty")
+		return nil, fmt.Errorf("tree is empty")
 	}
 
 	n := b.root
@@ -91,7 +91,7 @@ func (b *BTree) Get(key []byte) (string, error) {
 	idx, err := b.findEqualKeyIndexInNode(n, key)
 
 	if err != nil {
-		return "", fmt.Errorf("no key found")
+		return nil, fmt.Errorf("no key found")
 	}
 
 	return n.value[idx], nil
@@ -129,11 +129,11 @@ func (b *BTree) Delete(key []byte) error {
 }
 
 // Convenience helpers that encode integer keys using fixed-width big-endian
-func (b *BTree) InsertInt(k int, value string) error {
+func (b *BTree) InsertInt(k int, value []byte) error {
 	return b.Insert(convertIntToByte(k), value)
 }
 
-func (b *BTree) GetInt(k int) (string, error) {
+func (b *BTree) GetInt(k int) ([]byte, error) {
 	return b.Get(convertIntToByte(k))
 }
 
@@ -305,7 +305,7 @@ func (b *BTree) borrowKeyFromLeafNode(src, dst *Node, borrowFromLeft bool, paren
 
 		// prepend the KV into the dst
 		dst.key = append([][]byte{lastKey}, dst.key...)
-		dst.value = append([]string{lastVal}, dst.value...)
+		dst.value = append([][]byte{lastVal}, dst.value...)
 
 		// update separator: dst's first key changed
 		parent.key[dstIdx-1] = dst.key[0]
@@ -415,7 +415,7 @@ func (b *BTree) splitNode(node *Node, path []*Node) (left, right *Node) {
 		right = &Node{}
 		numRightKeys := len(node.key) - b.order
 		right.key = make([][]byte, numRightKeys)
-		right.value = make([]string, numRightKeys)
+		right.value = make([][]byte, numRightKeys)
 
 		left = node
 
@@ -533,7 +533,7 @@ func (b *BTree) insertKeyInNodeInPlace(node *Node, key []byte, childPtr *Node, i
 func (b *BTree) insertKVInLeafInPlace(
 	node *Node,
 	key []byte,
-	val string,
+	val []byte,
 	indexToInsert int,
 ) {
 	common.Assert(node.IsLeaf(), "insertKVInLeafInPlace called on internal node")
@@ -543,7 +543,7 @@ func (b *BTree) insertKVInLeafInPlace(
 		"leaf node key/value length mismatch: %d keys, %d values", len(node.key), len(node.value))
 
 	node.key = append(node.key, nil)
-	node.value = append(node.value, "")
+	node.value = append(node.value, nil)
 
 	// Shift keys and values to the right
 	copy(node.key[indexToInsert+1:], node.key[indexToInsert:])
@@ -631,7 +631,7 @@ func (b *BTree) printNode(node *Node, prefix string, isLast bool) {
 		}
 		if node.IsLeaf() {
 			// Leaf: show key:value
-			fmt.Printf("%s:%s", string(key), node.value[i])
+			fmt.Printf("%s:%s", string(key), string(node.value[i]))
 		} else {
 			// Internal: just show key
 			fmt.Printf("%s", string(key))

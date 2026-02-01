@@ -11,10 +11,10 @@ import (
 func TestInsert(t *testing.T) {
 	b := New(3)
 
-	err := b.Insert([]byte("a"), "v0")
+	err := b.Insert([]byte("a"), []byte("v0"))
 	assert.NoError(t, err)
 
-	err = b.Insert([]byte("b"), "v1")
+	err = b.Insert([]byte("b"), []byte("v1"))
 	assert.NoError(t, err)
 }
 
@@ -22,13 +22,13 @@ func TestGet(t *testing.T) {
 	b := New(3)
 
 	// prepare
-	_ = b.Insert([]byte("a"), "v0")
-	_ = b.Insert([]byte("b"), "v1")
+	_ = b.Insert([]byte("a"), []byte("v0"))
+	_ = b.Insert([]byte("b"), []byte("v1"))
 
 	// retrieve existing
 	v, err := b.Get([]byte("b"))
 	assert.NoError(t, err)
-	assert.Equal(t, "v1", v)
+	assert.Equal(t, []byte("v1"), v)
 
 	// missing key
 	_, err = b.Get([]byte("z"))
@@ -39,8 +39,8 @@ func TestDelete(t *testing.T) {
 	b := New(3)
 
 	// prepare
-	_ = b.Insert([]byte("a"), "v0")
-	_ = b.Insert([]byte("b"), "v1")
+	_ = b.Insert([]byte("a"), []byte("v0"))
+	_ = b.Insert([]byte("b"), []byte("v1"))
 
 	// delete one key
 	err := b.Delete([]byte("a"))
@@ -53,7 +53,7 @@ func TestDelete(t *testing.T) {
 	// ensure other key still exists
 	v, err := b.Get([]byte("b"))
 	assert.NoError(t, err)
-	assert.Equal(t, "v1", v)
+	assert.Equal(t, []byte("v1"), v)
 }
 
 // TestRandomizedOperations performs randomized inserts and deletes while
@@ -65,7 +65,7 @@ func TestRandomizedOperations(t *testing.T) {
 	rnd := rand.New(rand.NewSource(seed))
 
 	b := New(3)
-	ref := make(map[string]string)
+	ref := make(map[string][]byte)
 
 	// prepare a pool of candidate keys
 	poolSize := 300
@@ -93,7 +93,7 @@ func TestRandomizedOperations(t *testing.T) {
 				assert.Error(t, err, "expected delete to fail for missing key %s", k)
 			}
 		default: // insert or update
-			v := fmt.Sprintf("v%d", rnd.Intn(1_000_000))
+			v := []byte(fmt.Sprintf("v%d", rnd.Intn(1_000_000)))
 			err := b.Insert(kb, v)
 			assert.NoError(t, err, "insert failed for key %s", k)
 			// record expected value (insert or update)
