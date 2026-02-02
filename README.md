@@ -40,7 +40,7 @@ import bplustree "storage-engine/bplus-tree"
 tree := bplustree.New(3)
 
 // Insert
-tree.Insert([]byte("key"), "value")
+tree.Insert([]byte("key"), []byte("value"))
 
 // Get
 val, err := tree.Get([]byte("key"))
@@ -49,7 +49,7 @@ val, err := tree.Get([]byte("key"))
 err := tree.Delete([]byte("key"))
 
 // For integer keys (uses order-preserving encoding)
-tree.InsertInt(42, "value")
+tree.InsertInt(42, []byte("value"))
 tree.GetInt(42)
 tree.DeleteInt(42)
 
